@@ -32,6 +32,7 @@
 : isAtomic     ( char -- bool )               dup isAlpha swap isNum or ;
 : isSemiColon  ( char -- bool )               59 = ;
 : isSpace      ( char -- bool )               32 = ;
+: isTic        ( char -- bool )               96 = ;
 : getParen_cond ( addr len accum -- addr len accum bool )  rot dup c@ isRParen if 
                                                                      -rot dup 0<> 
                                                                     else
@@ -151,18 +152,41 @@ Defer parseList_ ( list addr len -- list )
 			 -rot      ( list addr len )
                          nextchar
                  else
-                 nextchar endif endif endif
+                 
+                 over c@ isTic if
+		    nextchar 
+                     skipspaces
+                     over c@ isLParen if nextchar endif
+                     2dup
+                     getParen toReturnStack ( List addr len )
+		     emptyNode       ( list addr len emptylist )
+		     -rot            ( list emptylist addr len )
+		     parseList_ mkThunk     ( list newlist ) 
+		     appendNode          ( list )
+		     popReturnStack  ( list addr len )
+                     nextchar
+                 else
+                 nextchar endif endif endif endif
 	repeat
         drop drop
 ;
 
-:noname parseAtomsInList ; is ParseList_
+:noname skipSpaces parseAtomsInList ; is ParseList_
 
 : parseList ( addr len -- list ) emptyNode -rot 40 scan nextchar parseList_ ;
 
 ( --- Serialization --- )
 
-: 4spaces 32 emit 32 emit 32 emit 32 emit ;
+Variable indent
+0 indent !
+
+4 constant margins 
+
+: increaseIndent indent @ margins + indent ! ;
+: decreaseIndent indent @ margins - indent ! ;
+
+: emitMargin indent @ 0 ?do 32 emit loop ;
+
 
 : showAtom unpackAtom type ;
 : showString 34 emit showAtom 34 emit ;
@@ -182,10 +206,21 @@ Defer serialize ( lisplist -- )
 		32 emit
              else
 	       dup c@ ListFlag = if
+                increaseIndent
 	        unpackLispList serialize
+                decreaseIndent
 		32 emit
                 drop
-	   endif endif endif
+             else
+	       dup c@ ThunkFlag = if
+                96 emit
+                32 emit
+                increaseIndent
+	        unpackLispList serialize
+                decreaseIndent
+		32 emit
+                drop
+	   endif endif endif endif
   nextNode
   repeat
   32 emit
@@ -193,12 +228,14 @@ Defer serialize ( lisplist -- )
 ;
 
 :noname ( lisplist -- )
+  cr
+  emitMargin 
   40 emit 
   32 emit 
   dup
   dup isEmpty if 41 emit else 
   serialHelper endif
-  drop
+  drop cr
 ; is serialize
 
 
@@ -208,4 +245,4 @@ Defer serialize ( lisplist -- )
 : lambda_KW s" lambda" ;
 : defun_KW  s" defun"  ;
 
-s\" ( lambda (x) \x22 hello \x22  ) " parseList serialize cr
+s\" ( lambda (x) ` ( 123 ) ) " parseList serialize 
