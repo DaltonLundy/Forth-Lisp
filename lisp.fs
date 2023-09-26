@@ -198,10 +198,12 @@ Defer serialize ( lisplist -- )
   dup if dup IsEmpty 0= else 0 endif while
 	   dup @
 	     dup c@ AtomFlag = if 
+                32 emit
 		showAtom
 		32 emit
 	     else
 	     dup c@ StrFlag = if 
+                32 emit
 		showString
 		32 emit
              else
@@ -223,7 +225,6 @@ Defer serialize ( lisplist -- )
 	   endif endif endif endif
   nextNode
   repeat
-  32 emit
   41 emit
 ;
 
@@ -231,11 +232,10 @@ Defer serialize ( lisplist -- )
   cr
   emitMargin 
   40 emit 
-  32 emit 
   dup
   dup isEmpty if 41 emit else 
   serialHelper endif
-  drop cr
+  drop 
 ; is serialize
 
 
@@ -245,4 +245,4 @@ Defer serialize ( lisplist -- )
 : lambda_KW s" lambda" ;
 : defun_KW  s" defun"  ;
 
-s\" ( lambda (x) ` ( 123 ) ) " parseList serialize 
+s\" ( lambda y (lambda (x) ( y x x )) ( lambda (x) ( y x x ) )) " parseList serialize 
