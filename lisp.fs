@@ -57,6 +57,9 @@
 : skipSpace ( addr len -- addr len )          32 skip ;
 : skipTab   ( addr len -- addr len )          9  skip ;
 : skipSpaces ( addr len -- addr len )         skipTab skipSpace ;
+: nextStrQuote ( addr len -- addr len )       begin 
+                                              dup -1 > if over c@ isStrQuote 0= else 0 endif while 
+                                              nextChar repeat ;
 
 ( --- Atoms --- )
 1 Constant AtomFlag
@@ -83,6 +86,30 @@
 : mkLispList ( list -- lisplist ) allocatelispList dup ListFlag swap c! 2dup 1+ ! nip ;
 : unpackLispList ( lispLIst -- ) 1+ @ ;
 
+( --- Strings --- )
+3 Constant StrFlag
+: allocateString ( addr ) cell 1+ allocate throw ;
+: MkString ( addr len -- addr ) mkAtom strFlag over c! ;
+: unPackString_ ( addr -- addr len ) unPackAtom ;
+: parseString  ( addr len -- addr len str ) 2dup nextStrQuote ( addr len newaddr newlen )
+                                            swap >r           ( addr len newlen )
+                                            2dup -            ( addr len newlen diff )
+                                            3 roll swap       ( len newlen addr diff )
+                                            mkString          ( len newlwn str )
+                                            rot               ( newlen str len )
+                                            drop              ( newlen str ) 
+                                            r>                ( newlen str newaddr )
+                                            rot               ( str newaddr newlen )
+                                            rot               ( newlen newaddr str )
+;
+
+( ----- Thunks ----- )
+4 Constant ThunkFlag
+: allocateThunk allocateLispList ;
+: mkThunk  mkLispList ThunkFlag over c! ;
+: unpackthunk unpackLispList ;
+
+
 ( --- Globals --- )
 Variable return_stack
 emptyNode return_stack !
@@ -105,8 +132,6 @@ Defer parseList_ ( list addr len -- list )
 		     appendNode          ( list )
 		     popReturnStack  ( list addr len )
                      nextchar
-                    \ s" back from recursion " type cr
-                    \ over c@ emit cr
                  else
   
                  over c@ isAtomic if
@@ -115,10 +140,18 @@ Defer parseList_ ( list addr len -- list )
 			 swap      ( addr len list atom )
 			 appendNode    ( addr len list )
 			 -rot      ( list addr len )
-                 \ s" parsed atom " type cr
                  else
-                 nextchar endif endif
-        \ .s cr
+                 
+                 over c@ isStrQuote if
+                         nextchar
+                         parseString
+			 3 roll    ( addr len atom list )
+			 swap      ( addr len list atom )
+			 appendNode    ( addr len list )
+			 -rot      ( list addr len )
+                         nextchar
+                 else
+                 nextchar endif endif endif
 	repeat
         drop drop
 ;
@@ -132,23 +165,27 @@ Defer parseList_ ( list addr len -- list )
 : 4spaces 32 emit 32 emit 32 emit 32 emit ;
 
 : showAtom unpackAtom type ;
+: showString 34 emit showAtom 34 emit ;
 
 Defer serialize ( lisplist -- )
 
 : serialHelper ( lisplist -- )
   begin
-\  .s cr
   dup if dup IsEmpty 0= else 0 endif while
 	   dup @
-	     dup c@ 1 = if 
+	     dup c@ AtomFlag = if 
 		showAtom
 		32 emit
 	     else
-	       dup c@ 2 = if
+	     dup c@ StrFlag = if 
+		showString
+		32 emit
+             else
+	       dup c@ ListFlag = if
 	        unpackLispList serialize
 		32 emit
                 drop
-	   endif endif
+	   endif endif endif
   nextNode
   repeat
   32 emit
@@ -163,3 +200,12 @@ Defer serialize ( lisplist -- )
   serialHelper endif
   drop
 ; is serialize
+
+
+( ----- Semantics ----- ) 
+
+  ( -- keyword -- )
+: lambda_KW s" lambda" ;
+: defun_KW  s" defun"  ;
+
+s\" ( lambda (x) \x22 hello \x22  ) " parseList serialize cr
