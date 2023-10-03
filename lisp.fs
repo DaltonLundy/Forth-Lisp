@@ -1,3 +1,7 @@
+( ------ misc ----------- )
+: 3dup  2 pick 2 pick 2 pick ;
+: 3drop drop drop drop ;
+
 ( ----- lists and their words ----- )
 
 : allocateNode ( addr )        2 cells allocate throw ;
@@ -272,8 +276,12 @@ Defer serialize ( lisplist -- )
 
 ( --- Dictionaries and their words --- )
 
- : addEntry ( Dict lispList addr len )  ;
-( ----- Semantics ----- ) 
+ : allocate-entry emptyNode ;
+ : mkEntry ( lispList addr len ) packString allocate-entry swap over ! swap over cell+ ! ;
+ : addEntry ( Dict lispList addr len )  mkEntry stack ;
+ : EmptyDict emptyNode ;
+
+( ----- Eval ----- ) 
 
   ( -- keyword -- )
 : lambda_KW s" lambda" ;
@@ -281,4 +289,55 @@ Defer serialize ( lisplist -- )
 : eval_KW   s" eval"   ;
 
 
- s" ( Lambda x ` ( x y ) ) " parseList copylispList serialize cr
+: replaced_Node ( node str addr -- node/addr ) 
+  >r 
+  unpackString  ( node straddr len )
+  rot ( straddr len node )
+  
+  dup >r 
+  unpackAtom ( straddr len atomaddr len2 )
+  str= if
+    rdrop r>
+  else
+    r> rdrop
+  endif
+;
+
+defer replace 
+
+: replace_ (  packedStr addr lisplist -- )
+  dup >r
+  -rot 2>r 
+  begin
+
+  dup isEmpty 0= while
+	  dup @ 
+
+	  dup c@ atomFlag = if
+            2r> 2dup 2>r replaced_node over ! 
+          else
+
+	  dup c@ listflag = if
+            2r> 2dup 2>r rot  
+            1+ @ replace 
+            drop
+          else 
+
+	  endif endif
+  nextnode repeat 
+  drop rdrop rdrop r>
+;
+
+:noname replace_  ; is replace
+
+ s" x" packString s" string to search for: " type dup . cr
+ s" (lambda (y) y ) " mkAtom s" what to replace it with: " type dup . cr
+ s" ( x ( x ( x ( x ) ) )) " parseList 
+copylispList s" copied list: " type dup . cr
+replace
+s" final result " type cr
+.s cr
+\ serialize
+\ cr
+\ dup 2 cells dump
+\ .s  cr
