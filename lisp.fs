@@ -16,6 +16,9 @@
                                    ( emptylist newnode emptylist )
                                    over cell+ ! nip endif ;
 
+
+
+
 ( --- String parsing gen words --- )
 : packString ( addr n -- addr )               2 cells allocate throw dup >r ! r> dup >r cell+ ! r> ;
 : unPackString ( addr -- addr n )             dup cell+ @ swap @ ;
@@ -80,12 +83,13 @@
 ;
 
 : unPackAtom ( addr -- addr len )  1+ @ dup cell+ @ swap @ ;
+: copyAtom ( addr1 -- addr2 )  unpackAtom  save-mem  mkAtom ;
 
 ( --- lisp lists --- )
 2 Constant ListFlag 
 : allocateLispList ( addr ) cell 1+ allocate throw ;
 : mkLispList ( list -- lisplist ) allocatelispList dup ListFlag swap c! 2dup 1+ ! nip ;
-: unpackLispList ( lispLIst -- ) 1+ @ ;
+: unpackLispList ( lispLIst -- list ) @ 1+ @ ;
 
 ( --- Strings --- )
 3 Constant StrFlag
@@ -104,12 +108,36 @@
                                             rot               ( newlen newaddr str )
 ;
 
+: copyStr unPackString_ save-mem MkString ;
+
 ( ----- Thunks ----- )
 4 Constant ThunkFlag
 : allocateThunk allocateLispList ;
 : mkThunk  mkLispList ThunkFlag over c! ;
 : unpackthunk unpackLispList ;
 
+Defer copyLispList 
+
+: copyLispList_ ( newlist oldlist -- newlist ) 
+  begin
+	  dup isEmpty 0= while
+	  dup >r
+	  @ 
+	  dup c@ AtomFlag = if
+	    copyAtom AppendNode
+	  else
+	  dup c@ ListFlag = if
+            1+ @ copyLispList mkLispList AppendNode
+          else 
+            abort
+	  endif endif
+	  r>
+          nextnode 
+  repeat 
+  drop
+;
+
+:noname emptyNode swap copyLispList_ ; is copyLispList
 
 ( --- Globals --- )
 Variable return_stack
@@ -209,7 +237,7 @@ Defer serialize ( lisplist -- )
              else
 	       dup c@ ListFlag = if
                 increaseIndent
-	        unpackLispList serialize
+                1+ @  serialize
                 decreaseIndent
 		32 emit
                 drop
@@ -218,7 +246,7 @@ Defer serialize ( lisplist -- )
                 96 emit
                 32 emit
                 increaseIndent
-	        unpackLispList serialize
+                1+ @  serialize
                 decreaseIndent
 		32 emit
                 drop
@@ -239,10 +267,15 @@ Defer serialize ( lisplist -- )
 ; is serialize
 
 
+( --- Dictionaries and their words --- )
+
+ : addEntry ( Dict lispList addr len )  ;
 ( ----- Semantics ----- ) 
 
   ( -- keyword -- )
 : lambda_KW s" lambda" ;
 : defun_KW  s" defun"  ;
+: eval_KW   s" eval"   ;
 
-s\" ( lambda y (lambda (x) ( y x x )) ( lambda (x) ( y x x ) )) " parseList serialize 
+
+s" ( Lambda x ( x y ) ) " parseList copylispList serialize cr
