@@ -129,8 +129,11 @@ Defer copyLispList
 	  dup c@ ListFlag = if
             1+ @ copyLispList mkLispList AppendNode
           else 
+	  dup c@ thunkFlag = if
+            1+ @ copyLispList mkthunk AppendNode
+          else 
             abort
-	  endif endif
+	  endif endif endif
 	  r>
           nextnode 
   repeat 
@@ -278,4 +281,4 @@ Defer serialize ( lisplist -- )
 : eval_KW   s" eval"   ;
 
 
-s" ( Lambda x ( x y ) ) " parseList copylispList serialize cr
+ s" ( Lambda x ` ( x y ) ) " parseList copylispList serialize cr
