@@ -19,9 +19,19 @@
                                     else
                                    ( emptylist newnode emptylist )
                                    over cell+ ! nip endif ;
+: nextNode2  ( node1 node2 -- node3 node4 ) nextnode swap nextnode swap ;
+: deleteNode ( list idx  -- )
+	1- 
+	swap dup nextnode 2>r
+	begin 
+	dup while
+		2r> dup isEmpty if abort endif nextnode2 2>r 1-
+	repeat
+	drop
+	2r> nextnode swap cell+ ! 
+;
 
-
-
+: isOneNode ( list -- bool ) nextnode isEmpty ;
 
 ( --- String parsing gen words --- )
 : packString ( addr n -- addr )               2 cells allocate throw dup >r ! r> dup >r cell+ ! r> ;
@@ -94,6 +104,8 @@
 : allocateLispList ( addr ) cell 1+ allocate throw ;
 : mkLispList ( list -- lisplist ) allocatelispList dup ListFlag swap c! 2dup 1+ ! nip ;
 : unpackLispList ( lispLIst -- list ) @ 1+ @ ;
+: toList ( addr -- lispList)  emptyNode swap appendNode ;
+: isNested ( List -- bool ) dup isOneNode if @ c@ ListFlag = else 0 endif ;
 
 ( --- Strings --- )
 3 Constant StrFlag
@@ -280,14 +292,20 @@ Defer serialize ( lisplist -- )
  : mkEntry ( lispList addr len ) packString allocate-entry swap over ! swap over cell+ ! ;
  : addEntry ( Dict lispList addr len )  mkEntry stack ;
  : EmptyDict emptyNode ;
+ : lookupDict ( Dict packedStr -- lisplist/0 )
+   over isEmpty if
+       drop drop 0
+   else
+      swap pop abort
+   endif
+ ;
 
 ( ----- Eval ----- ) 
 
-  ( -- keyword -- )
-: lambda_KW s" lambda" ;
-: defun_KW  s" defun"  ;
-: eval_KW   s" eval"   ;
-
+  ( -- keywords -- )
+s" lambda"  packString constant lambda_KW 
+s" defun"   packString constant defun_KW  
+s" eval"    packString constant eval_KW   
 
 : replaced_Node ( node str addr -- node/addr ) 
   >r 
@@ -309,7 +327,6 @@ defer replace
   dup >r
   -rot 2>r 
   begin
-
   dup isEmpty 0= while
 	  dup @ 
 
@@ -330,14 +347,41 @@ defer replace
 
 :noname replace_  ; is replace
 
- s" x" packString s" string to search for: " type dup . cr
- s" (lambda (y) y ) " mkAtom s" what to replace it with: " type dup . cr
- s" ( x ( x ( x ( x ) ) )) " parseList 
-copylispList s" copied list: " type dup . cr
-replace
-s" final result " type cr
-.s cr
-\ serialize
-\ cr
-\ dup 2 cells dump
-\ .s  cr
+: replace replace drop ;
+
+: isLambda ( lispList -- Bool ) @ unpackAtom lambda_kw unpackString str= ;
+: getvarArg ( lambda -- atom ) dup isLambda if nextnode @ 1+ @ @ else abort endif ;
+: introduce ( lispList -- ) dup isLambda if 
+                          nextnode dup 
+                          @ 1+ @ dup isEmpty if
+                            abort
+                          else
+                            pop drop mkLispList swap !
+                          endif
+                          else abort endif
+;
+: getBody  ( Lambda -- lisplist ) dup isLambda if 
+                                    nextnode nextnode 
+                                  else abort endif ;
+
+: emptyArgs ( lambda -- bool )    dup isLambda if 
+                                    nextNode @ 1+ @ isEmpty 
+                                  else abort endif ;
+: betaReduce ( arg Lambda  -- result ) 
+        dup isLambda if  
+        dup getvarArg unpackAtom packString 
+                 >r dup introduce 
+                      r> ( arg lambda/body packedStr )
+                     -rot ( packedStr arg lambda/body ) 
+                     dup >r replace r>
+                     dup emptyArgs if getBody endif 
+        else 
+            abort
+        endif
+;
+
+s" world" mkAtom
+s" hello" mkAtom
+s" (lambda (x y) x y ) " parseList 
+betareduce serialize cr
+betareduce serialize cr
