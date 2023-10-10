@@ -96,7 +96,7 @@
                                            rot      ( newList newLen Atom )
 ;
 
-: unPackAtom ( addr -- addr len )  1+ @ dup cell+ @ swap @ ;
+: unPackAtom ( addr -- addr len )   1+ @  dup cell+ @  swap @  ;
 : copyAtom ( addr1 -- addr2 )  unpackAtom  save-mem  mkAtom ;
 
 ( --- lisp lists --- )
@@ -128,17 +128,14 @@
 
 ( ----- Thunks ----- )
 4 Constant ThunkFlag
-: allocateThunk allocateLispList ;
-: mkThunk  mkLispList ThunkFlag over c! ;
-: unpackthunk unpackLispList ;
+: toThunk ( addr1 -- addr1 ) 1 cells 1+ allocate throw 
+                             swap over 1+ ! 
+                             ThunkFlag over c! ;
+: unThunk ( addr1 -- addr2 ) 1+ @ ;
 
 Defer copyLispList 
 
-: copyLispList_ ( newlist oldlist -- newlist ) 
-  begin
-	  dup isEmpty 0= while
-	  dup >r
-	  @ 
+: copyItem
 	  dup c@ AtomFlag = if
 	    copyAtom AppendNode
 	  else
@@ -146,10 +143,17 @@ Defer copyLispList
             1+ @ copyLispList mkLispList AppendNode
           else 
 	  dup c@ thunkFlag = if
-            1+ @ copyLispList mkthunk AppendNode
+            unThunk recurse toThunk
           else 
             abort
 	  endif endif endif
+;
+
+: copyLispList_ ( newlist oldlist -- newlist ) 
+  begin
+	  dup isEmpty 0= while
+	  dup >r
+	  @  copyItem
 	  r>
           nextnode 
   repeat 
@@ -166,6 +170,7 @@ emptyNode return_stack !
 
 ( --- Main Parsing --- )
 Defer parseList_ ( list addr len -- list )
+Defer parseThunk ( list addr len -- list )
 
 : parseAtomsInList ( list addr len -- list )
 	begin 
@@ -201,22 +206,32 @@ Defer parseList_ ( list addr len -- list )
                  else
                  
                  over c@ isTic if
-		    nextchar 
-                     skipspaces
-                     over c@ isLParen if nextchar endif
-                     2dup
-                     getParen toReturnStack ( List addr len )
-		     emptyNode       ( list addr len emptylist )
-		     -rot            ( list emptylist addr len )
-		     parseList_ mkThunk     ( list newlist ) 
-		     appendNode          ( list )
-		     popReturnStack  ( list addr len )
+		     parseThunk      ( list addr len ) 
                      nextchar
                  else
-                 nextchar endif endif endif endif
+                 nextchar 
+                 endif endif endif endif
 	repeat
         drop drop
 ;
+
+:noname  ( list addr len -- newlist addr len )
+        nextChar skipSpaces
+	over c@ isLParen if 
+                nextchar
+	        emptyNode       ( list addr len emptylist )
+	        -rot            ( list emptylist addr len )
+                2dup 
+                getParen
+                toReturnStack ( List addr len )
+		parseList_ 
+                mkLispList toThunk
+                appendNode
+	        popReturnStack  ( list addr len )
+	else 
+		parseAtom toThunk >r rot r> appendNode -rot
+	endif
+; is ParseThunk
 
 :noname skipSpaces parseAtomsInList ; is ParseList_
 
@@ -239,11 +254,9 @@ Variable indent
 : showString 34 emit showAtom 34 emit ;
 
 Defer serialize ( lisplist -- )
+Defer showThunk
 
-: serialHelper ( lisplist -- )
-  begin
-  dup if dup IsEmpty 0= else 0 endif while
-	   dup @
+: showItem ( addr -- )
 	     dup c@ AtomFlag = if 
                 32 emit
 		showAtom
@@ -262,16 +275,27 @@ Defer serialize ( lisplist -- )
                 drop
              else
 	       dup c@ ThunkFlag = if
-                96 emit
-                32 emit
+                 1+ @
+                 showThunk
+	   endif endif endif endif
+;
+
+:noname 
                 increaseIndent
-                1+ @  serialize
+                32 emit
+                96 emit
+                showItem 
                 decreaseIndent
 		32 emit
-                drop
-	   endif endif endif endif
+; is ShowThunk
+
+: serialHelper ( lisplist -- )
+  begin
+  dup if dup IsEmpty 0= if -1 else 0 endif endif while
+	   dup @ showItem
   nextNode
   repeat
+  drop
   41 emit
 ;
 
@@ -282,12 +306,12 @@ Defer serialize ( lisplist -- )
   dup
   dup isEmpty if 41 emit else 
   serialHelper endif
-  drop 
 ; is serialize
 
 
 ( --- Dictionaries and their words --- )
 
+\ Dictionaries are stacks of [ pointer to packed String ; ponter to corresponding lispList ]
  : allocate-entry emptyNode ;
  : mkEntry ( lispList addr len ) packString allocate-entry swap over ! swap over cell+ ! ;
  : addEntry ( Dict lispList addr len )  mkEntry stack ;
@@ -296,16 +320,33 @@ Defer serialize ( lisplist -- )
    over isEmpty if
        drop drop 0
    else
-      swap pop abort
+      >r pop 
+       dup @ unpackString r> dup >r unpackString str= if
+        rdrop cell+ @
+       else drop r> recurse
+       endif
    endif
  ;
+
+variable GlobalDict
+emptyNode GlobalDict !
 
 ( ----- Eval ----- ) 
 
   ( -- keywords -- )
-s" lambda"  packString constant lambda_KW 
-s" defun"   packString constant defun_KW  
-s" eval"    packString constant eval_KW   
+s" lambda"       packString constant lambda_KW 
+s" assign"       packString constant assign_KW  
+s" eval"         packString constant eval_KW   
+s" call_forth"   packString constant call_Forth_KW   
+s" stack_forth"  packString constant stack_Forth_KW
+
+ emptyNode
+ lambda_KW      stack
+ assign_KW      stack
+ eval_KW        stack
+ call_Forth_KW  stack
+ stack_Forth_KW stack
+ constant keyword_list
 
 : replaced_Node ( node str addr -- node/addr ) 
   >r 
@@ -322,39 +363,43 @@ s" eval"    packString constant eval_KW
 ;
 
 defer replace 
+defer replaceItem
 
-: replace_ (  packedStr addr lisplist -- )
-  dup >r
-  -rot 2>r 
-  begin
-  dup isEmpty 0= while
-	  dup @ 
+: replaceItem_ ( packedStr addr lisplist --  )
 
 	  dup c@ atomFlag = if
-            2r> 2dup 2>r replaced_node over ! 
+            -rot replaced_node over ! 
           else
 
 	  dup c@ listflag = if
-            2r> 2dup 2>r rot  
             1+ @ replace 
-            drop
           else 
 
-	  endif endif
-  nextnode repeat 
-  drop rdrop rdrop r>
+	 dup c@ thunkflag = if
+          1+ @ replaceItem
+          else
+          3drop
+	  endif endif endif
+;
+
+:noname replaceItem_ ; is replaceItem
+
+: replace_ (  packedStr addr lisplist -- )
+  begin
+  dup if dup isEmpty 0= else 0 endif while
+       3dup @ replaceItem_
+       nextnode 
+  repeat 
+  3drop 
 ;
 
 :noname replace_  ; is replace
-
-: replace replace drop ;
 
 : isLambda ( lispList -- Bool ) @ unpackAtom lambda_kw unpackString str= ;
 : getvarArg ( lambda -- atom ) dup isLambda if nextnode @ 1+ @ @ else abort endif ;
 : introduce ( lispList -- ) dup isLambda if 
                           nextnode dup 
                           @ 1+ @ dup isEmpty if
-                            abort
                           else
                             pop drop mkLispList swap !
                           endif
@@ -367,21 +412,24 @@ defer replace
 : emptyArgs ( lambda -- bool )    dup isLambda if 
                                     nextNode @ 1+ @ isEmpty 
                                   else abort endif ;
+
 : betaReduce ( arg Lambda  -- result ) 
-        dup isLambda if  
-        dup getvarArg unpackAtom packString 
-                 >r dup introduce 
-                      r> ( arg lambda/body packedStr )
-                     -rot ( packedStr arg lambda/body ) 
-                     dup >r replace r>
-                     dup emptyArgs if getBody endif 
-        else 
-            abort
-        endif
+      dup isLambda if  
+      dup getvarArg unpackAtom packString ( arg lambda varstr )
+               swap  ( arg varstr lambda )
+               dup introduce ( arg varstr lambda )
+                   -rot swap rot ( varStr arg lambda/body ) 
+                   dup >r ( varStr arg lambda ) 
+                   replace 
+                   r> ( lambda )
+                   dup emptyArgs if getBody endif 
+      else 
+          abort
+      endif
 ;
 
-s" world" mkAtom
-s" hello" mkAtom
-s" (lambda (x y) x y ) " parseList 
+s" world" mkatom
+s" hello" mkatom
+s" (  lambda (x y)  ` (x y) ) " parseList
 betareduce serialize cr
 betareduce serialize cr
