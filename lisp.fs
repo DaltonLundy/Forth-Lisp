@@ -328,17 +328,17 @@ Defer showThunk
    endif
  ;
 
-variable GlobalDict
-emptyNode GlobalDict !
+variable GlobalDictF
+emptyNode GlobalDictF !
 
-: stackGlobalDict ( addr -- )
-  GlobalDict @ swap stack 
-  GlobalDict !
+: stackGlobalDictF ( addr -- )
+  GlobalDictF @ swap stack 
+  GlobalDictF !
 ;
 
-: popGlobalDict ( -- addr )
-  GlobalDict @ pop 
-  swap GlobalDict !
+: popGlobalDictf ( -- addr )
+  GlobalDictf @ pop 
+  swap GlobalDictf !
 ;
 
 ( ----- Eval ----- ) 
@@ -348,14 +348,18 @@ s" lambda"       packString constant lambda_KW
 s" assign"       packString constant assign_KW  
 s" eval"         packString constant eval_KW   
 s" call_forth"   packString constant call_Forth_KW   
-s" stack_forth"  packString constant stack_Forth_KW
+s" cons"         packString constant cons_KW   
+s" head"         packString constant head_KW   
+s" tail"         packString constant tail_KW   
 
  emptyNode
  lambda_KW      stack
  assign_KW      stack
  eval_KW        stack
  call_Forth_KW  stack
- stack_Forth_KW stack
+ cons_KW        stack
+ head_KW        stack
+ tail_KW        stack
  constant keyword_list
 
 : replaced_Node ( node str addr -- node/addr ) 
@@ -438,7 +442,7 @@ defer replaceItem
       endif
 ;
 
-: assign_ ( addr atom -- ) unpackAtom mkEntry stackGlobalDict ;
+: assign_ ( addr atom -- ) unpackAtom mkEntry stackGlobalDictf ;
 
 : isAssign ( lispList -- bool ) @ 
                              dup c@ atomflag = if 
@@ -454,5 +458,67 @@ defer replaceItem
   else abort endif
 ;
 
-s" (  assign x y ) " parseList assign
-globalDict @
+: isCons ( lisplist -- bool ) @
+                             dup c@ atomflag = if 
+                                   unpackatom s" cons" str= 
+                             else 0 endif
+;
+: cons ( lisplist -- lisplist )
+  dup isCons if 
+     nextnode 
+     dup nextnode @ c@ ListFlag = if
+          dup nextnode @ 1+ @ swap @ stack
+   else abort endif 
+  else abort endif 
+;
+
+: isHead ( lisplist -- bool ) @
+                             dup c@ atomflag = if 
+                                   unpackatom s" head" str= 
+                             else 0 endif
+;
+
+: head ( lisplist -- addr ) 
+ dup isHead if
+  nextnode
+  dup @ c@ listFlag = if
+   @ 1+ @ @
+  else abort endif
+ else abort endif
+;
+
+: isTail ( lisplist -- bool ) @
+                             dup c@ atomflag = if 
+                                   unpackatom s" tail" str= 
+                             else 0 endif
+;
+
+: tail ( lisplist -- addr ) 
+ dup istail if
+  nextnode
+  dup @ c@ listFlag = if
+   @ 1+ @ nextnode 
+  else abort endif
+ else abort endif
+;
+
+: isCall_Forth ( lisplist -- bool ) @
+                             dup c@ atomflag = if 
+                                   unpackatom s" callforth" str= 
+                             else 0 endif
+;
+
+: call_forth ( lisplist --  ) 
+ dup isCall_Forth if
+  nextnode
+  dup @ c@ StrFlag = if
+   @ 1+ @ unpackString evaluate
+  else abort endif
+ else abort endif
+;
+
+Defer eval
+
+: test s" hello world! " type cr ;
+
+s\" (  callforth \"test\" ) " parseList call_forth
