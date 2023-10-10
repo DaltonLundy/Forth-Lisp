@@ -331,6 +331,16 @@ Defer showThunk
 variable GlobalDict
 emptyNode GlobalDict !
 
+: stackGlobalDict ( addr -- )
+  GlobalDict @ swap stack 
+  GlobalDict !
+;
+
+: popGlobalDict ( -- addr )
+  GlobalDict @ pop 
+  swap GlobalDict !
+;
+
 ( ----- Eval ----- ) 
 
   ( -- keywords -- )
@@ -428,8 +438,21 @@ defer replaceItem
       endif
 ;
 
-s" world" mkatom
-s" hello" mkatom
-s" (  lambda (x y)  ` (x y) ) " parseList
-betareduce serialize cr
-betareduce serialize cr
+: assign_ ( addr atom -- ) unpackAtom mkEntry stackGlobalDict ;
+
+: isAssign ( lispList -- bool ) @ 
+                             dup c@ atomflag = if 
+                                   unpackatom s" assign" str= 
+                             else 0 endif
+;
+
+: assign  ( lisplist  -- )
+  dup isAssign if 
+    dup nextnode @ c@ atomFlag = if
+       dup  nextnode nextnode @ swap nextnode @ assign_
+    else abort endif 
+  else abort endif
+;
+
+s" (  assign x y ) " parseList assign
+globalDict @
