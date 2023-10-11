@@ -511,8 +511,8 @@ defer replaceItem
 : call_forth ( lisplist --  ) 
  dup isCall_Forth if
   nextnode
-  dup @ c@ StrFlag = if
-   @ 1+ @ unpackString evaluate
+  dup nextnode @ c@ StrFlag = if
+   dup @ swap nextnode @ 1+ @ unpackString evaluate
   else abort endif
  else abort endif
 ;
@@ -521,4 +521,4 @@ Defer eval
 
 : test s" hello world! " type cr ;
 
-s\" (  callforth \"test\" ) " parseList call_forth
+s\" (  callforth \"hello world\" \" showstring \" ) " parseList call_forth
